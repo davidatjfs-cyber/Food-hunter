@@ -1,33 +1,32 @@
 import streamlit as st
 import datetime
 import re
-import requests
 from langchain_openai import ChatOpenAI
 from langchain_community.tools.tavily_search import TavilySearchResults
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
-from tavily import TavilyClient
 
 # --- 1. 页面配置 ---
 st.set_page_config(
-    page_title="Chef R&D Pro",
+    page_title="Chef R&D Pure",
     page_icon="👨‍🍳",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# --- 2. CSS 样式 (增加了步骤列表的样式) ---
+# --- 2. CSS 样式 (纯净版，无图片样式) ---
 st.markdown("""
 <style>
     h1 {color: #1A1A1A; font-family: 'Helvetica Neue', sans-serif;}
     .block-container {padding-bottom: 100px;}
     
+    /* 报告卡片：深红中式风格 */
     .report-card {
         background-color: #ffffff;
         padding: 24px;
         border-radius: 16px;
         border: 1px solid #f0f0f0;
-        border-left: 6px solid #B71C1C; /* 改回深红色，代表中式高端 */
+        border-left: 6px solid #B71C1C; /* 中国红 */
         margin-top: 20px;
         box-shadow: 0 4px 20px rgba(0,0,0,0.06);
     }
@@ -84,36 +83,6 @@ st.markdown("""
         color: #555;
         border-left: 3px solid #B71C1C;
     }
-
-    /* 图片容器 */
-    .dish-image-container {
-        margin-top: 15px;
-        border-radius: 12px;
-        overflow: hidden;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-        background: #f9f9f9;
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        flex-direction: column;
-        border: 1px solid #eee;
-    }
-    .dish-image {
-        width: 100%;
-        height: 280px;
-        object-fit: cover;
-        display: block;
-    }
-    .image-caption {
-        font-size: 0.8rem;
-        color: #888;
-        padding: 8px;
-        font-style: italic;
-        width: 100%;
-        text-align: center;
-        background: #fafafa;
-        border-top: 1px solid #eee;
-    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -129,29 +98,23 @@ tavily_key = get_api_key("TAVILY_API_KEY")
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# --- 4. 辅助函数：搜图 + 验图 ---
-def search_tavily_image(query, api_key):
-    try:
-        client = TavilyClient(api_key=api_key)
-        response = client.search(query=query, search_depth="basic", include_images=True, max_results=1)
-        if 'images' in response and len(response['images']) > 0:
-            return response['images'][0]
-        return None
-    except Exception as e:
-        return None
-
-def check_image_validity(url):
-    if not url: return False
-    try:
-        headers = {"User-Agent": "Mozilla/5.0"}
-        r = requests.head(url, headers=headers, timeout=1.5)
-        if r.status_code in [405, 403]:
-             r = requests.get(url, headers=headers, stream=True, timeout=1.5)
-        if r.status_code == 200:
-            return True
-    except:
-        return False
-    return False
+# --- 4. 辅助函数：将 HTML 转为纯文本供复制 ---
+def clean_html_for_copy(html_text):
+    """
+    把漂亮的 HTML 转换成适合复制到微信的纯文本
+    """
+    # 替换标题
+    text = html_text.replace("<h4>", "\n【").replace("</h4>", "】\n")
+    text = text.replace('<div class="dish-title">', "\n===============\n🍲 ").replace("</div>", "\n===============\n")
+    text = text.replace("<strong>", "").replace("</strong>", "")
+    text = text.replace('<div class="step-item">', "👉 ").replace("</div>", "")
+    
+    # 去掉剩余标签
+    text = re.sub(r'<[^>]+>', '', text)
+    
+    # 调整空行
+    text = re.sub(r'\n\s*\n', '\n\n', text)
+    return text.strip()
 
 # --- 5. 侧边栏 ---
 with st.sidebar:
@@ -170,34 +133,34 @@ with st.sidebar:
         st.rerun()
 
 # --- 6. 主界面 ---
-st.title("👨‍🍳 研发总监 (深度SOP版)")
-st.caption("v21.0: 中式创意 • 包含具体食材与烹饪步骤 • 严查图片")
+st.title("👨‍🍳 研发总监 (纯净SOP版)")
+st.caption("v22.0: 无图极速 • 中式创意 • 一键复制")
 
-# --- 7. Prompt (核心升级：增加SOP和中式比重) ---
+# --- 7. Prompt (移除图片指令) ---
 base_url = "https://api.deepseek.com"
 model_name = "deepseek-chat"
 
 RD_PROMPT_TEXT = """
-你是一名拥有25年经验的**【中餐研发总监】**，精通潮汕菜、粤菜，并熟悉分子料理和西餐摆盘。
+你是一名拥有25年经验的**【中餐研发总监】**，精通潮汕菜、粤菜。
 你的设计风格是：**"中魂西技"**（Chinese Soul, Modern Presentation）。
 
 用户需求："{user_input}"
 市场情报："{evidence}"
 
 请设计 **3道** 高溢价的创意菜品，方向如下：
-1.  **【新中式·意境菜】**：保留传统口味，但在形态和器皿上极具东方美学（如山水意境）。
-2.  **【中西·高定融合】**：用西式顶级食材（如黑松露、鱼子酱）赋能中式经典菜。
-3.  **【功夫·位上菜】**：体现繁复手工和火候，适合按位上的高端菜。
+1.  **【新中式·意境菜】**
+2.  **【中西·高定融合】**
+3.  **【功夫·位上菜】**
 
 ⚠️ **格式铁律：**
 1.  **纯 HTML 输出**，顶格写，不要缩进，不要 ```html。
-2.  **内容详实：** 必须包含具体的【食材清单】和【SOP步骤】。
-3.  **不加链接**。
+2.  **不要图片，不要链接**。
+3.  **内容详实：** 必须包含【精准食材】和【SOP步骤】。
 
 输出模板（HTML）：
-<div class="report-card" data-dish-name="菜名1">
+<div class="report-card">
 <div class="dish-title">1. 菜名1</div>
-<p><strong>💡 研发理念：</strong>(一句话讲出卖点，如"用西式慢煮重塑潮汕卤水")</p>
+<p><strong>💡 研发理念：</strong>...</p>
 
 <h4>🥩 精准食材 (Ingredients)</h4>
 <p>
@@ -216,8 +179,6 @@ RD_PROMPT_TEXT = """
 <h4>🎨 摆盘美学 (Plating)</h4>
 <p><strong>器皿建议：</strong>...</p>
 <p><strong>装饰：</strong>...</p>
-
-<div class="image-placeholder"></div>
 </div>
 
 (请重复3次，分别对应三个方案)
@@ -227,7 +188,17 @@ RD_PROMPT_TEXT = """
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         if msg["role"] == "assistant":
+            # 渲染漂亮的 HTML 卡片
             st.markdown(msg["content"], unsafe_allow_html=True)
+            
+            # --- 生成“复制框” ---
+            # 如果是 AI 的回复，就在下面加一个复制框
+            # 只有当内容包含 "report-card" 时才显示（避免把报错信息也弄成复制框）
+            if "report-card" in msg["content"]:
+                clean_text = clean_html_for_copy(msg["content"])
+                with st.expander("📝 点击复制纯文本 (用于发微信/文档)"):
+                    st.code(clean_text, language=None)
+
         else:
             st.markdown(msg["content"])
 
@@ -246,12 +217,11 @@ if user_input:
         placeholder = st.empty()
         try:
             with st.spinner("👨‍🍳 总厨正在拆解SOP步骤..."):
-                # 搜索策略：增加 "做法" "食谱" "配方" 等关键词
                 search_query = f"{user_input} 高端中餐 创意菜 做法食谱 详细配方plating"
                 search = TavilySearchResults(tavily_api_key=tavily_key, max_results=5)
                 evidence = search.invoke(search_query)
                 
-                llm = ChatOpenAI(base_url=base_url, api_key=deepseek_key, model=model_name, temperature=0.6) # 温度调低，让步骤更严谨
+                llm = ChatOpenAI(base_url=base_url, api_key=deepseek_key, model=model_name, temperature=0.6)
                 chain = ChatPromptTemplate.from_messages([
                     ("system", RD_PROMPT_TEXT),
                     ("user", "") 
@@ -264,41 +234,16 @@ if user_input:
                 cleaned_lines = [line.strip() for line in text_response.split('\n')]
                 text_response = "\n".join(cleaned_lines)
 
-            # --- 自动配图 (严查版) ---
-            final_response = text_response
-            dish_names = re.findall(r'data-dish-name="([^"]+)"', text_response)
+            # 显示漂亮的卡片
+            placeholder.markdown(text_response, unsafe_allow_html=True)
             
-            with st.status("🖼️ 正在搜寻参考图...", expanded=True) as status:
-                for i, dish_name in enumerate(dish_names):
-                    status.write(f"正在找图：{dish_name}")
-                    img_query = f"{dish_name} 精致中餐摆盘 实拍图"
-                    image_url = search_tavily_image(img_query, tavily_key)
-                    
-                    is_valid = False
-                    if image_url:
-                        if check_image_validity(image_url):
-                            is_valid = True
-                    
-                    if is_valid:
-                        image_html = f"""<div class="dish-image-container"><img src="{image_url}" class="dish-image" alt="{dish_name}"><div class="image-caption">参考图源：Tavily AI Search</div></div>"""
-                        final_response = final_response.replace('<div class="image-placeholder"></div>', image_html, 1)
-                    else:
-                        final_response = final_response.replace('<div class="image-placeholder"></div>', '', 1)
-                        
-                status.update(label="✅ 完成", state="complete", expanded=False)
-
-            # 显示最终结果
-            placeholder.markdown(final_response, unsafe_allow_html=True)
-            st.session_state.messages.append({"role": "assistant", "content": final_response})
+            # 保存到历史
+            st.session_state.messages.append({"role": "assistant", "content": text_response})
             
-            # 下载按钮
-            now_str = datetime.datetime.now().strftime('%Y%m%d_%H%M')
-            st.download_button(
-                label="📥 下载SOP研发方案",
-                data=final_response,
-                file_name=f"研发SOP_{now_str}.html",
-                mime="text/html"
-            )
+            # 立即显示复制框
+            clean_text = clean_html_for_copy(text_response)
+            with st.expander("📝 点击复制纯文本 (用于发微信/文档)", expanded=True):
+                st.code(clean_text, language=None)
 
         except Exception as e:
             st.error(f"运行出错: {e}")
