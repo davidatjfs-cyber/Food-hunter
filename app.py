@@ -5,9 +5,9 @@ from langchain_community.tools.tavily_search import TavilySearchResults
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 
-# --- 1. 页面配置 ---
+# --- 1. 页面配置 (保持美观的 v5 UI) ---
 st.set_page_config(
-    page_title="FoodHunter Pro",
+    page_title="FoodHunter Classic",
     page_icon="🦞",
     layout="wide",
     initial_sidebar_state="collapsed"
@@ -37,7 +37,6 @@ def get_api_key(key_name):
 deepseek_key = get_api_key("DEEPSEEK_API_KEY")
 tavily_key = get_api_key("TAVILY_API_KEY")
 
-# 初始化 Session
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
@@ -55,65 +54,42 @@ with st.sidebar:
         st.rerun()
 
 # --- 4. 标题 ---
-st.title("🦞 餐饮情报官 (智能搜索版)")
-st.caption("v7.0: 自动优化搜索词，解决答非所问")
+st.title("🦞 餐饮情报官 (经典版)")
+st.caption("回归初心：最直接的搜索，最真实的反馈")
 
 def handle_quick_action(prompt_text):
     st.session_state.messages.append({"role": "user", "content": prompt_text})
     st.session_state.trigger_run = True
 
 if len(st.session_state.messages) == 0:
-    st.markdown("### 🔥 试一试")
+    st.markdown("### 🔥 经典指令")
     c1, c2 = st.columns(2)
     with c1:
         if st.button("🍲 本月爆款拆解"):
-            handle_quick_action("帮我搜一下最近一个月上海餐饮市场最火的爆款单品是什么？")
+            handle_quick_action("最近一个月上海餐饮市场最火的爆款单品是什么？")
             st.rerun()
     with c2:
         if st.button("👀 竞对差评分析"):
             handle_quick_action("帮我搜一下上海大宁久光附近的粤菜馆，看看顾客差评主要集中在哪？")
             st.rerun()
 
-# --- 5. 核心逻辑：两步走 (先生成搜索词 -> 再生成报告) ---
+# --- 5. 核心逻辑 (回归最原始、最有效的 Prompt) ---
 base_url = "https://api.deepseek.com"
 model_name = "deepseek-chat"
 
-# A. 搜索词优化专家 Agent
-QUERY_GEN_PROMPT = """
-你是一个Google搜索专家。
-用户的原始问题是："{user_input}"
-今天是：{current_date}
+# 这里去掉了复杂的指令，让 AI 自由发挥，反而往往效果最好
+CLASSIC_PROMPT = """
+你是一名餐饮研发总监。
+请根据下面的【搜索结果】，回答老板的问题。
 
-请将这个问题转化为**一个**最适合在搜索引擎输入的关键词。
-目标：找到最新的、真实的消费者评价或餐饮数据。
-技巧：
-1. 去掉语气词。
-2. 加上具体的地域（如果用户没说，默认假设是上海）。
-3. 加上"大众点评"、"小红书"、"推荐"、"避坑"等词。
-
-**只输出优化后的搜索词，不要有任何其他废话。**
-"""
-
-# B. 报告生成专家 Agent
-REPORT_PROMPT = """
-你是一名餐饮数据分析师。
-请基于以下的【搜索结果】，回答用户的问题："{user_input}"
-
-⚠️ **回答原则：**
-1. **直接回答：** 不要在那绕弯子，直接给出结论。
-2. **基于证据：** 搜索结果里说了什么就说什么，没说就说没查到。
-3. **视觉链接：** 仅给【核心菜名】加链接：[菜名](https://www.google.com/search?tbm=isch&q=菜名)。
+要求：
+1. **重点突出：** 发现什么就说什么，不要废话。
+2. **图文结合：** 遇到具体的菜名，请给出 Google 图片链接，格式为：[菜名](https://www.google.com/search?tbm=isch&q=菜名)。
 
 报告结构：
 <div class="report-card">
-<h3>📊 核心结论</h3>
-(直球回答用户的问题)
-
-<h4>1. 🕵️‍♂️ 详细情报</h4>
-(列出具体的菜品、评价或数据)
-
-<h4>2. 💡 建议</h4>
-(简短建议)
+<h3>📊 分析报告</h3>
+(你的分析内容)
 </div>
 
 ---
@@ -147,38 +123,30 @@ if user_input or st.session_state.get("trigger_run", False):
     with st.chat_message("assistant"):
         placeholder = st.empty()
         try:
-            now = datetime.datetime.now()
-            llm = ChatOpenAI(base_url=base_url, api_key=deepseek_key, model=model_name, temperature=0.5)
-
-            # --- 第一步：智能生成搜索词 ---
-            with st.status("🧠 正在思考最佳搜索策略...", expanded=True) as status:
-                gen_chain = ChatPromptTemplate.from_template(QUERY_GEN_PROMPT) | llm | StrOutputParser()
-                optimized_query = gen_chain.invoke({
-                    "user_input": current_prompt,
-                    "current_date": now.strftime("%Y-%m-%d")
-                })
-                # 清理一下生成的词（去掉可能的引号）
-                optimized_query = optimized_query.replace('"', '').strip()
+            with st.spinner("🚀 正在搜索..."):
+                # --- 回归经典搜索逻辑 ---
+                # 不做复杂的改写，直接把你说的词加上“最新”两个字扔给搜索引擎
+                # 这种方式最简单粗暴，但往往最不会出错
+                search_query = f"{current_prompt} 最新 餐饮趋势"
                 
-                status.write(f"🔍 原始问题：{current_prompt}")
-                status.write(f"✨ **优化后去搜：** `{optimized_query}`")
-                
-                # --- 第二步：执行搜索 ---
-                status.write("正在全网检索...")
                 search = TavilySearchResults(tavily_api_key=tavily_key, max_results=5)
-                evidence = search.invoke(optimized_query)
-                status.write(f"✅ 找到 {len(evidence)} 条相关情报")
-                status.update(label="✅ 情报收集完毕", state="complete", expanded=False)
+                evidence = search.invoke(search_query)
+                
+                # --- 推理 ---
+                llm = ChatOpenAI(base_url=base_url, api_key=deepseek_key, model=model_name, temperature=0.6)
+                
+                chain = ChatPromptTemplate.from_messages([
+                    ("system", CLASSIC_PROMPT),
+                    ("user", "问题: {input}\n\n搜索结果: {evidence}")
+                ]) | llm | StrOutputParser()
+                
+                response = chain.invoke({
+                    "input": current_prompt, 
+                    "evidence": evidence
+                })
 
-            # --- 第三步：生成回答 ---
-            final_chain = ChatPromptTemplate.from_template(REPORT_PROMPT) | llm | StrOutputParser()
-            response = final_chain.invoke({
-                "user_input": current_prompt,
-                "evidence": evidence
-            })
-
-            placeholder.markdown(response, unsafe_allow_html=True)
-            st.session_state.messages.append({"role": "assistant", "content": response})
+                placeholder.markdown(response, unsafe_allow_html=True)
+                st.session_state.messages.append({"role": "assistant", "content": response})
 
         except Exception as e:
             st.error(f"运行出错: {e}")
