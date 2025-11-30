@@ -1,13 +1,13 @@
 import streamlit as st
-import datetime # 引入时间模块
+import datetime
 from langchain_openai import ChatOpenAI
 from langchain_community.tools.tavily_search import TavilySearchResults
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 
 # --- 1. 页面配置 ---
-st.set_page_config(page_title="FoodHunter - 餐饮情报官", page_icon="🦞", layout="wide")
-st.title("🦞 FoodHunter: 强时效版 (只看最新趋势)")
+st.set_page_config(page_title="FoodHunter Pro", page_icon="🦞", layout="wide")
+st.title("🦞 FoodHunter: 餐饮情报官 (带历史记录版)")
 
 # --- 2. 自动获取密钥 ---
 def get_api_key(key_name):
@@ -18,105 +18,117 @@ def get_api_key(key_name):
 deepseek_key = get_api_key("DEEPSEEK_API_KEY")
 tavily_key = get_api_key("TAVILY_API_KEY")
 
-# --- 3. 侧边栏配置 ---
+# --- 3. 初始化历史记录 (关键步骤) ---
+# 如果内存里没有“messages”，就创建一个空的列表
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
+# --- 4. 侧边栏配置 ---
 with st.sidebar:
     st.header("🔑 系统配置")
+    
+    # 显示清除历史按钮
+    if st.button("🗑️ 清空历史记录"):
+        st.session_state.messages = []
+        st.rerun()
+        
+    st.divider()
+    
     if not deepseek_key:
         deepseek_key = st.text_input("DeepSeek API Key", type="password")
-    else:
-        st.success("✅ DeepSeek Key 已自动加载")
-
     if not tavily_key:
         tavily_key = st.text_input("Tavily API Key", type="password")
-    else:
-        st.success("✅ Tavily Key 已自动加载")
         
     base_url = "https://api.deepseek.com"
     model_name = "deepseek-chat" 
 
-# --- 4. 核心 Prompt (加入时间过滤机制) ---
+# --- 5. 核心 Prompt ---
 TREND_HUNTER_PROMPT = """
 你是一名拥有15年经验的【餐饮研发总监】。
 今天是：{current_date}。
+核心原则：**【只关注最新趋势】**。
 
-你的核心原则是：**【只关注最新趋势】**。
-请根据搜索结果回答老板的问题。
+请根据搜索结果回答老板的需求。
+如果搜索结果是1年前的旧闻，请直接忽略或标注。
 
-⚠️ **严格的时间审查机制：**
-1. 优先采用 **近3个月内** 的数据和案例。
-2. 如果搜索结果是 **1年前** 的旧闻（除非是经典案例），请直接忽略或明确标注“这是去年的数据”。
-3. 如果搜索结果没有明确时间，请根据内容上下文判断是否过时。
-
-请输出策划案：
-# 💡 餐饮情报分析报告 (日期: {current_date})
-
-### 1. 🎯 本月/本季核心趋势
-(一句话总结当下的热点)
-
-### 2. 🍲 最新爆款拆解
-* **流行产品：**
-* **火爆逻辑：**
-* **参考案例：** (必须注明是哪家店，最近什么时候火的)
-
+请输出 Markdown 格式策划案：
+# 💡 餐饮情报分析报告
+### 1. 🎯 核心趋势提炼
+### 2. 🍲 爆款拆解
 ### 3. 🛠️ 落地建议
-* **新品建议：**
-* **营销文案：**
 
 ---
-**数据来源与时间戳：** {evidence}
+**数据来源：** {evidence}
 """
 
-# --- 5. 主逻辑 ---
-user_input = st.text_area("你想了解什么最新情报？", height=100, 
-                         placeholder="例如：最近上海夜市最火的小吃是什么？")
+# --- 6. 页面主逻辑 (聊天窗口模式) ---
 
-check_btn = st.button("🔍 挖掘最新情报", type="primary")
+# A. 先把历史记录画在屏幕上
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
 
-if check_btn:
+# B. 等待用户输入新问题
+if prompt := st.chat_input("你想了解什么餐饮情报？(例如：上海最近火锅流行什么？)"):
+    
+    # 1. 检查 Key
     if not deepseek_key or not tavily_key:
-        st.error("❌ 缺少 API Key")
-    else:
+        st.error("❌ 请先配置 API Key")
+        st.stop()
+
+    # 2. 显示用户的问题
+    with st.chat_message("user"):
+        st.markdown(prompt)
+    # 把用户问题存入历史
+    st.session_state.messages.append({"role": "user", "content": prompt})
+
+    # 3. AI 开始思考 (显示加载动画)
+    with st.chat_message("assistant"):
+        message_placeholder = st.empty()
+        
         try:
-            with st.status("⏱️ 正在锁定最新时间线...", expanded=True) as status:
-                
-                # 1. 获取当前时间 (比如: 2024年5月)
+            with st.status("⏱️ 正在全网检索最新情报...", expanded=True) as status:
                 now = datetime.datetime.now()
                 current_date_str = now.strftime("%Y年%m月")
+                search_query = f"{prompt} {current_date_str} 最新趋势 爆款"
                 
-                # 2. 构造带时间的搜索词 (强制搜索最新)
-                # 技巧：加上 "after:2024-01-01" 这种语法有助于部分引擎，但直接加年份月份最稳妥
-                search_query = f"{user_input} {current_date_str} 最新趋势 爆款"
-                
-                status.write(f"正在全网检索关键词: 「{search_query}」...")
-                
-                # Tavily 搜索
+                # 搜索
                 search = TavilySearchResults(tavily_api_key=tavily_key, max_results=6)
                 evidence = search.invoke(search_query)
                 status.write(f"✅ 采集到 {len(evidence)} 条情报")
                 
-                # 3. 推理
-                status.write("正在过滤旧闻，提炼新趋势...")
-                llm = ChatOpenAI(
-                    base_url=base_url,
-                    api_key=deepseek_key,
-                    model=model_name,
-                    temperature=0.5 # 调低一点，让它更严谨
-                )
+                # 推理
+                status.write("正在撰写报告...")
+                llm = ChatOpenAI(base_url=base_url, api_key=deepseek_key, model=model_name, temperature=0.5)
                 
                 chain = ChatPromptTemplate.from_messages([
                     ("system", TREND_HUNTER_PROMPT),
                     ("user", "老板的需求: {input}\n\n市场情报: {evidence}")
                 ]) | llm | StrOutputParser()
                 
-                # 把当前日期传给 AI
-                report = chain.invoke({
-                    "input": user_input, 
+                full_response = chain.invoke({
+                    "input": prompt, 
                     "evidence": evidence,
-                    "current_date": now.strftime("%Y-%m-%d") 
+                    "current_date": now.strftime("%Y-%m-%d")
                 })
-                status.update(label="✅ 最新报告已生成", state="complete", expanded=False)
+                
+                status.update(label="✅ 完成", state="complete", expanded=False)
             
-            st.markdown(report)
+            # 显示 AI 回复
+            message_placeholder.markdown(full_response)
             
+            # 4. 把 AI 回复存入历史
+            st.session_state.messages.append({"role": "assistant", "content": full_response})
+            
+            # --- 5. 新增：下载按钮 ---
+            # 生成一个独立的文件名，比如 "餐饮报告_20231001.md"
+            file_name = f"餐饮情报_{now.strftime('%H%M%S')}.md"
+            st.download_button(
+                label="💾 下载这份报告",
+                data=full_response,
+                file_name=file_name,
+                mime="text/markdown"
+            )
+
         except Exception as e:
             st.error(f"出错啦: {e}")
