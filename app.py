@@ -1,6 +1,7 @@
 import streamlit as st
 import datetime
 import re
+import requests # 引入请求库，用于检测图片死链
 from langchain_openai import ChatOpenAI
 from langchain_community.tools.tavily_search import TavilySearchResults
 from langchain_core.prompts import ChatPromptTemplate
@@ -88,7 +89,7 @@ st.markdown("""
         justify-content: center;
         align-items: center;
         flex-direction: column;
-        /* 注意：如果图片加载失败，我们会用JS隐藏整个容器 */
+        border: 1px solid #eee;
     }
     .dish-image {
         width: 100%;
@@ -121,7 +122,7 @@ tavily_key = get_api_key("TAVILY_API_KEY")
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# --- 4. Tavily 搜图 ---
+# --- 4. 辅助函数：搜图 + 验图 ---
 def search_tavily_image(query, api_key):
     try:
         client = TavilyClient(api_key=api_key)
@@ -130,8 +131,31 @@ def search_tavily_image(query, api_key):
             return response['images'][0]
         return None
     except Exception as e:
-        print(f"Error: {e}")
         return None
+
+def check_image_validity(url):
+    """
+    🔥 核心升级：派侦察兵去检测图片链接是否有效
+    """
+    if not url: return False
+    try:
+        # 伪装成浏览器访问
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+        }
+        # 只请求头信息(head)，速度快，不下载图片
+        r = requests.head(url, headers=headers, timeout=1.5)
+        
+        # 如果 head 请求被拒绝(有些网站不支持)，尝试 get
+        if r.status_code == 405 or r.status_code == 403:
+             r = requests.get(url, headers=headers, stream=True, timeout=1.5)
+             
+        # 只要状态码是 200，就认为图片是活的
+        if r.status_code == 200:
+            return True
+    except:
+        return False
+    return False
 
 # --- 5. 侧边栏 ---
 with st.sidebar:
@@ -150,8 +174,8 @@ with st.sidebar:
         st.rerun()
 
 # --- 6. 主界面 ---
-st.title("👨‍🍳 行政总厨 (纯净图文版)")
-st.caption("v20.0: 有图则显，无图隐身 • 宁缺毋滥")
+st.title("👨‍🍳 行政总厨 (严查死链版)")
+st.caption("v20.1: 后端验证图片有效性 • 100%无破损")
 
 # --- 7. Prompt ---
 base_url = "https://api.deepseek.com"
@@ -228,23 +252,32 @@ if user_input:
                 cleaned_lines = [line.strip() for line in text_response.split('\n')]
                 text_response = "\n".join(cleaned_lines)
 
-            # --- 自动配图 (宁缺毋滥版) ---
+            # --- 自动配图 (后端严查版) ---
             final_response = text_response
             dish_names = re.findall(r'data-dish-name="([^"]+)"', text_response)
             
-            with st.status("🖼️ 正在搜寻配图...", expanded=True) as status:
+            with st.status("🖼️ 正在搜寻并验证配图...", expanded=True) as status:
                 for i, dish_name in enumerate(dish_names):
                     status.write(f"正在找图：{dish_name}")
                     img_query = f"{dish_name} 精致菜品摄影 fine dining"
                     image_url = search_tavily_image(img_query, tavily_key)
                     
+                    is_valid = False
                     if image_url:
-                        # 🔥 核心逻辑：有图就显示，
-                        # 并且加了一个 onerror 事件：如果图片链接坏了，JS会自动把整个容器(parentElement)隐藏掉
-                        image_html = f"""<div class="dish-image-container"><img src="{image_url}" class="dish-image" alt="{dish_name}" onerror="this.parentElement.style.display='none'"><div class="image-caption">参考图源：Tavily AI Search</div></div>"""
+                        # 🔥 关键步骤：派侦察兵去检测
+                        status.write(f"正在验证链接有效性...")
+                        if check_image_validity(image_url):
+                            is_valid = True
+                        else:
+                            status.write(f"⚠️ 图片链接失效，已丢弃")
+                    
+                    if is_valid:
+                        # 只有检测通过的图，才会被写进 HTML
+                        image_html = f"""<div class="dish-image-container"><img src="{image_url}" class="dish-image" alt="{dish_name}"><div class="image-caption">参考图源：Tavily AI Search</div></div>"""
                         final_response = final_response.replace('<div class="image-placeholder"></div>', image_html, 1)
+                        status.write(f"✅ 图片有效，已加载")
                     else:
-                        # 🔥 如果搜不到图，直接把占位符删掉，什么都不留
+                        # 否则，直接删掉占位符，不留痕迹
                         final_response = final_response.replace('<div class="image-placeholder"></div>', '', 1)
                         
                 status.update(label="✅ 完成", state="complete", expanded=False)
