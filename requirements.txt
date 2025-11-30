@@ -2,3 +2,4 @@ streamlit
 langchain-openai
 langchain-community
 tavily-python
+streamlit-mic-recorder
