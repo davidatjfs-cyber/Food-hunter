@@ -5,9 +5,9 @@ from langchain_community.tools.tavily_search import TavilySearchResults
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 
-# --- 1. 页面配置 (保持美观的 v5 UI) ---
+# --- 1. 页面配置 ---
 st.set_page_config(
-    page_title="FoodHunter Classic",
+    page_title="FoodHunter Dish",
     page_icon="🦞",
     layout="wide",
     initial_sidebar_state="collapsed"
@@ -19,11 +19,13 @@ st.markdown("""
     .block-container {padding-top: 2rem; padding-bottom: 10rem;} 
     h1 {color: #D32F2F;}
     .report-card {
-        background-color: #f8f9fa;
+        background-color: #fff;
         padding: 20px;
         border-radius: 12px;
+        border: 1px solid #eee;
         border-left: 5px solid #D32F2F;
         margin-top: 10px;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.05);
     }
 </style>
 """, unsafe_allow_html=True)
@@ -54,42 +56,53 @@ with st.sidebar:
         st.rerun()
 
 # --- 4. 标题 ---
-st.title("🦞 餐饮情报官 (经典版)")
-st.caption("回归初心：最直接的搜索，最真实的反馈")
+st.title("🦞 餐饮情报官 (硬核菜品版)")
+st.caption("v8.0: 专治答非所问，强制输出具体菜名")
 
 def handle_quick_action(prompt_text):
     st.session_state.messages.append({"role": "user", "content": prompt_text})
     st.session_state.trigger_run = True
 
 if len(st.session_state.messages) == 0:
-    st.markdown("### 🔥 经典指令")
+    st.markdown("### 🔥 查具体的")
     c1, c2 = st.columns(2)
     with c1:
-        if st.button("🍲 本月爆款拆解"):
-            handle_quick_action("最近一个月上海餐饮市场最火的爆款单品是什么？")
+        if st.button("🍲 本月爆款菜品"):
+            handle_quick_action("最近一个月上海餐饮市场最火的具体菜品有哪些？列出名字。")
             st.rerun()
     with c2:
-        if st.button("👀 竞对差评分析"):
-            handle_quick_action("帮我搜一下上海大宁久光附近的粤菜馆，看看顾客差评主要集中在哪？")
+        if st.button("👀 竞对招牌菜"):
+            handle_quick_action("帮我搜一下大宁久光附近的粤菜馆，大家最推荐的必点菜是什么？")
             st.rerun()
 
-# --- 5. 核心逻辑 (回归最原始、最有效的 Prompt) ---
+# --- 5. 核心 Prompt (这里加了死命令) ---
 base_url = "https://api.deepseek.com"
 model_name = "deepseek-chat"
 
-# 这里去掉了复杂的指令，让 AI 自由发挥，反而往往效果最好
-CLASSIC_PROMPT = """
-你是一名餐饮研发总监。
-请根据下面的【搜索结果】，回答老板的问题。
+DISH_HUNTER_PROMPT = """
+你是一名【菜品数据采集员】。
+请根据【搜索结果】，回答用户的问题。
 
-要求：
-1. **重点突出：** 发现什么就说什么，不要废话。
-2. **图文结合：** 遇到具体的菜名，请给出 Google 图片链接，格式为：[菜名](https://www.google.com/search?tbm=isch&q=菜名)。
+⚠️ **最高指令（必须严格遵守）：**
+1. **我要名词，不要形容词：** 用户问“有什么产品”，你必须回答具体的**菜名**（如：黑金流沙包、熟醉蟹），**严禁**回答“喜欢辣的”、“重口味”这种废话。
+2. **清单体：** 直接列出菜名清单，不要写长篇大论的分析。
+3. **视觉链接：** 必须给每一个【具体菜名】加上 Google 图片链接。格式：[菜名](https://www.google.com/search?tbm=isch&q=菜名)。
+
+❌ **错误示范：**
+"最近流行比较鲜美的口味，大家喜欢吃海鲜。" (这是废话，禁止输出)
+
+✅ **正确示范：**
+"最近流行的爆款菜品有：
+1. **[熟醉罗氏虾](...)**：酒香浓郁，点击率极高。
+2. **[避风塘炒珍宝蟹](...)**：聚餐必点。"
 
 报告结构：
 <div class="report-card">
-<h3>📊 分析报告</h3>
-(你的分析内容)
+<h3>📋 爆款菜品清单</h3>
+(这里直接列出 3-5 个具体的菜名)
+
+<h4>💡 简要备注</h4>
+(这道菜为什么火？一句话解释)
 </div>
 
 ---
@@ -123,20 +136,19 @@ if user_input or st.session_state.get("trigger_run", False):
     with st.chat_message("assistant"):
         placeholder = st.empty()
         try:
-            with st.spinner("🚀 正在搜索..."):
-                # --- 回归经典搜索逻辑 ---
-                # 不做复杂的改写，直接把你说的词加上“最新”两个字扔给搜索引擎
-                # 这种方式最简单粗暴，但往往最不会出错
-                search_query = f"{current_prompt} 最新 餐饮趋势"
+            with st.spinner("🚀 正在搜索具体菜单..."):
+                # --- 搜索逻辑修改：强制加后缀 ---
+                # 无论你问什么，我都在后面加上 "必点菜 推荐菜 菜单"，逼搜索引擎找菜名
+                search_query = f"{current_prompt} 必点菜 推荐菜 菜单具体名称"
                 
                 search = TavilySearchResults(tavily_api_key=tavily_key, max_results=5)
                 evidence = search.invoke(search_query)
                 
                 # --- 推理 ---
-                llm = ChatOpenAI(base_url=base_url, api_key=deepseek_key, model=model_name, temperature=0.6)
+                llm = ChatOpenAI(base_url=base_url, api_key=deepseek_key, model=model_name, temperature=0.3) # 温度调低，防止胡编
                 
                 chain = ChatPromptTemplate.from_messages([
-                    ("system", CLASSIC_PROMPT),
+                    ("system", DISH_HUNTER_PROMPT),
                     ("user", "问题: {input}\n\n搜索结果: {evidence}")
                 ]) | llm | StrOutputParser()
                 
