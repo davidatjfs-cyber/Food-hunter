@@ -5,36 +5,33 @@ from langchain_openai import ChatOpenAI
 from langchain_community.tools.tavily_search import TavilySearchResults
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
+# 引入 Tavily 客户端 (直接用来搜图)
+from tavily import TavilyClient
 
 # --- 1. 页面配置 ---
 st.set_page_config(
-    page_title="Chef Fusion History",
+    page_title="Chef Fusion Gallery (Tavily)",
     page_icon="👨‍🍳",
     layout="wide",
-    initial_sidebar_state="expanded" # 默认展开侧边栏，为了看历史
+    initial_sidebar_state="expanded"
 )
 
-# --- 2. CSS 样式 (去掉了链接样式，保留黑金卡片) ---
+# --- 2. CSS 样式 ---
 st.markdown("""
 <style>
-    /* 全局字体 */
     h1 {color: #1A1A1A; font-family: 'Helvetica Neue', sans-serif;}
-    
-    /* 底部留白 */
     .block-container {padding-bottom: 100px;}
     
-    /* 报告卡片：黑金风格 */
     .report-card {
         background-color: #ffffff;
         padding: 24px;
         border-radius: 16px;
         border: 1px solid #f0f0f0;
-        border-left: 6px solid #C5A059; /* 香槟金 */
+        border-left: 6px solid #C5A059;
         margin-top: 20px;
         box-shadow: 0 4px 20px rgba(0,0,0,0.06);
     }
     
-    /* 菜名标题 (去掉了链接颜色，改为黑金) */
     .dish-title {
         font-size: 1.4rem;
         font-weight: 700;
@@ -45,7 +42,6 @@ st.markdown("""
         line-height: 1.4;
     }
     
-    /* 核心章节标题 (H4) */
     h4 {
         color: #C5A059 !important;
         font-size: 1.05rem !important;
@@ -53,10 +49,8 @@ st.markdown("""
         margin-top: 20px !important;
         margin-bottom: 8px !important;
         text-transform: uppercase;
-        letter-spacing: 0.5px;
     }
     
-    /* 正文文字 */
     p, li {
         font-size: 1rem;
         line-height: 1.6;
@@ -64,7 +58,6 @@ st.markdown("""
         margin-bottom: 10px;
     }
     
-    /* 摆盘美学高亮块 */
     .plating-box {
         background-color: #F8F8F8;
         border-radius: 8px;
@@ -75,7 +68,6 @@ st.markdown("""
         font-size: 0.95rem;
     }
     
-    /* 侧边栏历史记录样式 */
     .history-item {
         padding: 8px 10px;
         background: #f0f2f6;
@@ -85,10 +77,39 @@ st.markdown("""
         color: #555;
         border-left: 3px solid #C5A059;
     }
+
+    /* 图片容器 */
+    .dish-image-container {
+        margin-top: 15px;
+        border-radius: 12px;
+        overflow: hidden;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        background: #f9f9f9;
+        min-height: 200px;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        flex-direction: column;
+    }
+    .dish-image {
+        width: 100%;
+        height: 280px;
+        object-fit: cover;
+        display: block;
+    }
+    .image-caption {
+        font-size: 0.8rem;
+        color: #888;
+        padding: 8px;
+        font-style: italic;
+        width: 100%;
+        text-align: center;
+        background: #fafafa;
+    }
 </style>
 """, unsafe_allow_html=True)
 
-# --- 3. 密钥管理 ---
+# --- 3. 密钥管理 (只用两个 Key) ---
 def get_api_key(key_name):
     if key_name in st.secrets:
         return st.secrets[key_name]
@@ -100,47 +121,48 @@ tavily_key = get_api_key("TAVILY_API_KEY")
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# --- 4. 侧边栏 (新增：历史记录列表) ---
-with st.sidebar:
-    st.title("⚙️ 设置 & 历史")
-    
-    # 1. 设置区
-    with st.expander("🔑 API Key 配置"):
-        if not deepseek_key:
-            deepseek_key = st.text_input("DeepSeek Key", type="password")
-        if not tavily_key:
-            tavily_key = st.text_input("Tavily Key", type="password")
-            
-    if st.button("🗑️ 清空所有记录", type="primary"):
-        st.session_state.messages = []
-        st.rerun()
+# --- 4. 核心功能：Tavily 搜图函数 ---
+def search_tavily_image(query, api_key):
+    """使用 Tavily 搜索图片 URL"""
+    try:
+        # 初始化客户端
+        client = TavilyClient(api_key=api_key)
+        # include_images=True 是关键
+        response = client.search(query=query, search_depth="basic", include_images=True, max_results=1)
         
+        # 提取图片
+        if 'images' in response and len(response['images']) > 0:
+            return response['images'][0] # 返回第一张图的链接
+        return None
+    except Exception as e:
+        print(f"Tavily image search failed: {e}")
+        return None
+
+# --- 5. 侧边栏 ---
+with st.sidebar:
+    st.title("📜 历史提问")
     st.divider()
-    
-    # 2. 历史提问区 (模仿 Chat 列表)
-    st.subheader("📜 历史提问")
-    
-    # 筛选出用户的提问
     user_msgs = [m for m in st.session_state.messages if m["role"] == "user"]
-    
     if not user_msgs:
         st.caption("暂无记录")
     else:
-        # 倒序显示，最新的在最上面
         for i, msg in enumerate(reversed(user_msgs)):
-            # 截取前20个字作为标题
             title = msg["content"][:20] + "..." if len(msg["content"]) > 20 else msg["content"]
             st.markdown(f'<div class="history-item">{title}</div>', unsafe_allow_html=True)
+    st.divider()
+    if st.button("🗑️ 清空记录"):
+        st.session_state.messages = []
+        st.rerun()
 
-# --- 5. 主界面标题 ---
-st.title("👨‍🍳 行政总厨 (纯净版)")
-st.caption("v17.0: 无链接 • 左侧历史记录 • 摆盘指导")
+# --- 6. 主界面 ---
+st.title("👨‍🍳 行政总厨 (Tavily图文版)")
+st.caption("v19.0: 无需Google Key • 自动配图 • 研发必备")
 
-# --- 6. 核心 Prompt (去掉了链接指令) ---
+# --- 7. 核心 Prompt ---
 base_url = "https://api.deepseek.com"
 model_name = "deepseek-chat"
 
-FUSION_PROMPT = """
+FUSION_PROMPT_TEXT = """
 你是一名精通**【中西融合菜】**的行政总厨。
 用户需求："{user_input}"
 市场情报："{evidence}"
@@ -149,12 +171,13 @@ FUSION_PROMPT = """
 
 ⚠️ **格式铁律：**
 1.  **纯 HTML 输出：** 不要用 ```html 包裹。
-2.  **不要缩进：** 所有 HTML 标签必须顶格写。
-3.  **不要加链接：** 菜名直接写文本即可，不要加 <a> 标签。
+2.  **不要缩进：** 所有 HTML 标签顶格写。
+3.  **不要加链接/图片标签：** 这一步只输出文本结构。
+4.  **关键标记：** 在菜名的 `<div>` 里加上 `data-dish-name="菜名"`。
 
-输出模板（直接输出 HTML）：
-<div class="report-card">
-<div class="dish-title">1. 菜名</div>
+输出模板（HTML）：
+<div class="report-card" data-dish-name="菜名1">
+<div class="dish-title">1. 菜名1</div>
 <h4>💡 中西融合灵感</h4>
 <p>解释融合点...</p>
 <h4>👨‍🍳 核心食材与技法</h4>
@@ -164,10 +187,13 @@ FUSION_PROMPT = """
 <p><strong>器皿：</strong>...</p>
 <p><strong>构图：</strong>...</p>
 </div>
+<div class="image-placeholder"></div>
 </div>
+
+(请重复3次，分别对应三个方案)
 """
 
-# --- 7. 主程序 ---
+# --- 8. 主程序 ---
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         if msg["role"] == "assistant":
@@ -175,58 +201,82 @@ for msg in st.session_state.messages:
         else:
             st.markdown(msg["content"])
 
-# --- 8. 输入框 ---
-user_input = st.chat_input("输入研发需求（例如：做一道适合秋季的创意鸭肉菜）...")
+user_input = st.chat_input("输入研发需求（例如：做一道有仪式感的牛肉菜）...")
 
-# --- 执行逻辑 ---
 if user_input:
     st.session_state.messages.append({"role": "user", "content": user_input})
     with st.chat_message("user"):
         st.markdown(user_input)
 
     if not deepseek_key or not tavily_key:
-        st.error("❌ 未检测到 API Key")
+        st.error("❌ API Key 缺失，请检查 Secrets 中是否配置了 DEEPSEEK_API_KEY 和 TAVILY_API_KEY。")
         st.stop()
 
     with st.chat_message("assistant"):
         placeholder = st.empty()
         try:
-            with st.spinner("👨‍🍳 总厨正在设计方案..."):
+            # --- 第一阶段：生成文本报告 ---
+            with st.spinner("👨‍🍳 总厨正在构思方案..."):
                 search_query = f"{user_input} 高端摆盘 中西融合菜 做法 创意 plating"
                 search = TavilySearchResults(tavily_api_key=tavily_key, max_results=5)
                 evidence = search.invoke(search_query)
                 
                 llm = ChatOpenAI(base_url=base_url, api_key=deepseek_key, model=model_name, temperature=0.7)
-                
                 chain = ChatPromptTemplate.from_messages([
-                    ("system", FUSION_PROMPT),
+                    ("system", FUSION_PROMPT_TEXT),
                     ("user", "") 
                 ]) | llm | StrOutputParser()
                 
-                response = chain.invoke({
-                    "user_input": user_input, 
-                    "evidence": evidence
-                })
+                text_response = chain.invoke({"user_input": user_input, "evidence": evidence})
                 
-                # 清洗代码框
-                response = re.sub(r"```[a-zA-Z]*", "", response)
-                response = response.replace("```", "")
-                
-                # 清除缩进
-                cleaned_lines = [line.strip() for line in response.split('\n')]
-                response = "\n".join(cleaned_lines)
+                # 清洗代码
+                text_response = re.sub(r"```[a-zA-Z]*", "", text_response).replace("```", "")
+                cleaned_lines = [line.strip() for line in text_response.split('\n')]
+                text_response = "\n".join(cleaned_lines)
 
-                placeholder.markdown(response, unsafe_allow_html=True)
-                st.session_state.messages.append({"role": "assistant", "content": response})
-                
-                # 下载按钮
-                now_str = datetime.datetime.now().strftime('%Y%m%d_%H%M')
-                st.download_button(
-                    label="📥 下载这份研发报告",
-                    data=response,
-                    file_name=f"研发方案_{now_str}.html",
-                    mime="text/html"
-                )
+            # --- 第二阶段：Tavily 自动配图 ---
+            final_response = text_response
+            
+            # 提取菜名
+            dish_names = re.findall(r'data-dish-name="([^"]+)"', text_response)
+            
+            with st.status("🖼️ 正在搜寻配图 (via Tavily)...", expanded=True) as status:
+                for i, dish_name in enumerate(dish_names):
+                    status.write(f"正在为「{dish_name}」找图...")
+                    
+                    # 搜图关键词：加上 "真实图片" "精致" 提高命中率
+                    img_query = f"{dish_name} 精致菜品摄影 实拍图"
+                    
+                    # 使用 Tavily 搜图
+                    image_url = search_tavily_image(img_query, tavily_key)
+                    
+                    if image_url:
+                        status.write(f"✅ 找到图片 (方案 {i+1})")
+                        image_html = f"""
+                        <div class="dish-image-container">
+                            <img src="{image_url}" class="dish-image" alt="{dish_name}" onerror="this.style.display='none'">
+                            <div class="image-caption">参考图源：Tavily AI Search</div>
+                        </div>
+                        """
+                        final_response = final_response.replace('<div class="image-placeholder"></div>', image_html, 1)
+                    else:
+                        status.write(f"⚠️ 没找到合适图片，已跳过")
+                        final_response = final_response.replace('<div class="image-placeholder"></div>', '', 1)
+                        
+                status.update(label="✅ 研发报告完成", state="complete", expanded=False)
+
+            # 显示最终结果
+            placeholder.markdown(final_response, unsafe_allow_html=True)
+            st.session_state.messages.append({"role": "assistant", "content": final_response})
+            
+            # 下载按钮
+            now_str = datetime.datetime.now().strftime('%Y%m%d_%H%M')
+            st.download_button(
+                label="📥 下载图文报告",
+                data=final_response,
+                file_name=f"研发方案_{now_str}.html",
+                mime="text/html"
+            )
 
         except Exception as e:
             st.error(f"运行出错: {e}")
