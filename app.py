@@ -1,7 +1,7 @@
 import streamlit as st
 import datetime
 import re
-import requests # 引入请求库，用于检测图片死链
+import requests
 from langchain_openai import ChatOpenAI
 from langchain_community.tools.tavily_search import TavilySearchResults
 from langchain_core.prompts import ChatPromptTemplate
@@ -10,13 +10,13 @@ from tavily import TavilyClient
 
 # --- 1. 页面配置 ---
 st.set_page_config(
-    page_title="Chef Fusion Pro",
+    page_title="Chef R&D Pro",
     page_icon="👨‍🍳",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# --- 2. CSS 样式 ---
+# --- 2. CSS 样式 (增加了步骤列表的样式) ---
 st.markdown("""
 <style>
     h1 {color: #1A1A1A; font-family: 'Helvetica Neue', sans-serif;}
@@ -27,13 +27,13 @@ st.markdown("""
         padding: 24px;
         border-radius: 16px;
         border: 1px solid #f0f0f0;
-        border-left: 6px solid #C5A059;
+        border-left: 6px solid #B71C1C; /* 改回深红色，代表中式高端 */
         margin-top: 20px;
         box-shadow: 0 4px 20px rgba(0,0,0,0.06);
     }
     
     .dish-title {
-        font-size: 1.4rem;
+        font-size: 1.5rem;
         font-weight: 700;
         color: #1A1A1A;
         margin-bottom: 15px;
@@ -42,30 +42,37 @@ st.markdown("""
         line-height: 1.4;
     }
     
+    /* 章节标题 */
     h4 {
-        color: #C5A059 !important;
-        font-size: 1.05rem !important;
+        color: #B71C1C !important;
+        font-size: 1.1rem !important;
         font-weight: bold !important;
-        margin-top: 20px !important;
-        margin-bottom: 8px !important;
-        text-transform: uppercase;
+        margin-top: 25px !important;
+        margin-bottom: 10px !important;
+        background: #FFEBEE;
+        padding: 5px 10px;
+        border-radius: 4px;
+        display: inline-block;
     }
     
     p, li {
         font-size: 1rem;
         line-height: 1.6;
         color: #333;
-        margin-bottom: 10px;
+        margin-bottom: 8px;
     }
-    
-    .plating-box {
-        background-color: #F8F8F8;
-        border-radius: 8px;
+
+    /* SOP 步骤样式 */
+    .step-box {
+        background: #FAFAFA;
         padding: 15px;
-        border-left: 4px solid #333;
-        margin-top: 10px;
-        color: #555;
-        font-size: 0.95rem;
+        border-radius: 8px;
+        border: 1px dashed #ccc;
+    }
+    .step-item {
+        margin-bottom: 8px; 
+        padding-left: 10px;
+        border-left: 3px solid #ddd;
     }
     
     .history-item {
@@ -75,10 +82,10 @@ st.markdown("""
         margin-bottom: 8px;
         font-size: 0.9rem;
         color: #555;
-        border-left: 3px solid #C5A059;
+        border-left: 3px solid #B71C1C;
     }
 
-    /* 图片容器样式 */
+    /* 图片容器 */
     .dish-image-container {
         margin-top: 15px;
         border-radius: 12px;
@@ -93,7 +100,7 @@ st.markdown("""
     }
     .dish-image {
         width: 100%;
-        height: 250px;
+        height: 280px;
         object-fit: cover;
         display: block;
     }
@@ -134,23 +141,12 @@ def search_tavily_image(query, api_key):
         return None
 
 def check_image_validity(url):
-    """
-    🔥 核心升级：派侦察兵去检测图片链接是否有效
-    """
     if not url: return False
     try:
-        # 伪装成浏览器访问
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-        }
-        # 只请求头信息(head)，速度快，不下载图片
+        headers = {"User-Agent": "Mozilla/5.0"}
         r = requests.head(url, headers=headers, timeout=1.5)
-        
-        # 如果 head 请求被拒绝(有些网站不支持)，尝试 get
-        if r.status_code == 405 or r.status_code == 403:
+        if r.status_code in [405, 403]:
              r = requests.get(url, headers=headers, stream=True, timeout=1.5)
-             
-        # 只要状态码是 200，就认为图片是活的
         if r.status_code == 200:
             return True
     except:
@@ -159,7 +155,7 @@ def check_image_validity(url):
 
 # --- 5. 侧边栏 ---
 with st.sidebar:
-    st.title("📜 历史提问")
+    st.title("📜 研发历史")
     st.divider()
     user_msgs = [m for m in st.session_state.messages if m["role"] == "user"]
     if not user_msgs:
@@ -174,38 +170,53 @@ with st.sidebar:
         st.rerun()
 
 # --- 6. 主界面 ---
-st.title("👨‍🍳 行政总厨 (严查死链版)")
-st.caption("v20.1: 后端验证图片有效性 • 100%无破损")
+st.title("👨‍🍳 研发总监 (深度SOP版)")
+st.caption("v21.0: 中式创意 • 包含具体食材与烹饪步骤 • 严查图片")
 
-# --- 7. Prompt ---
+# --- 7. Prompt (核心升级：增加SOP和中式比重) ---
 base_url = "https://api.deepseek.com"
 model_name = "deepseek-chat"
 
-FUSION_PROMPT_TEXT = """
-你是一名精通**【中西融合菜】**的行政总厨。
+RD_PROMPT_TEXT = """
+你是一名拥有25年经验的**【中餐研发总监】**，精通潮汕菜、粤菜，并熟悉分子料理和西餐摆盘。
+你的设计风格是：**"中魂西技"**（Chinese Soul, Modern Presentation）。
+
 用户需求："{user_input}"
 市场情报："{evidence}"
 
-请提供 **3个** 高溢价的研发方案。
+请设计 **3道** 高溢价的创意菜品，方向如下：
+1.  **【新中式·意境菜】**：保留传统口味，但在形态和器皿上极具东方美学（如山水意境）。
+2.  **【中西·高定融合】**：用西式顶级食材（如黑松露、鱼子酱）赋能中式经典菜。
+3.  **【功夫·位上菜】**：体现繁复手工和火候，适合按位上的高端菜。
 
 ⚠️ **格式铁律：**
-1.  **纯 HTML 输出：** 不要用 ```html 包裹。
-2.  **不要缩进：** 所有 HTML 标签顶格写。
-3.  **不要加链接/图片标签：** 这一步只输出文本结构。
-4.  **关键标记：** 在菜名的 `<div>` 里加上 `data-dish-name="菜名"`。
+1.  **纯 HTML 输出**，顶格写，不要缩进，不要 ```html。
+2.  **内容详实：** 必须包含具体的【食材清单】和【SOP步骤】。
+3.  **不加链接**。
 
 输出模板（HTML）：
 <div class="report-card" data-dish-name="菜名1">
 <div class="dish-title">1. 菜名1</div>
-<h4>💡 中西融合灵感</h4>
-<p>解释融合点...</p>
-<h4>👨‍🍳 核心食材与技法</h4>
-<p>列出关键材料...</p>
-<h4>🎨 摆盘美学 (Plating)</h4>
-<div class="plating-box">
-<p><strong>器皿：</strong>...</p>
-<p><strong>构图：</strong>...</p>
+<p><strong>💡 研发理念：</strong>(一句话讲出卖点，如"用西式慢煮重塑潮汕卤水")</p>
+
+<h4>🥩 精准食材 (Ingredients)</h4>
+<p>
+<strong>主料：</strong>...<br>
+<strong>辅料：</strong>...<br>
+<strong>关键调味：</strong>...
+</p>
+
+<h4>🔥 落地步骤 (SOP)</h4>
+<div class="step-box">
+<div class="step-item"><strong>Step 1 (预处理)：</strong>...</div>
+<div class="step-item"><strong>Step 2 (烹饪/火候)：</strong>...</div>
+<div class="step-item"><strong>Step 3 (调味/收汁)：</strong>...</div>
 </div>
+
+<h4>🎨 摆盘美学 (Plating)</h4>
+<p><strong>器皿建议：</strong>...</p>
+<p><strong>装饰：</strong>...</p>
+
 <div class="image-placeholder"></div>
 </div>
 
@@ -220,7 +231,7 @@ for msg in st.session_state.messages:
         else:
             st.markdown(msg["content"])
 
-user_input = st.chat_input("输入研发需求（例如：做一道有仪式感的牛肉菜）...")
+user_input = st.chat_input("输入研发需求（例如：想做一道用花胶为主料的创意前菜）...")
 
 if user_input:
     st.session_state.messages.append({"role": "user", "content": user_input})
@@ -234,14 +245,15 @@ if user_input:
     with st.chat_message("assistant"):
         placeholder = st.empty()
         try:
-            with st.spinner("👨‍🍳 总厨正在构思方案..."):
-                search_query = f"{user_input} 高端摆盘 中西融合菜 做法 创意 plating"
+            with st.spinner("👨‍🍳 总厨正在拆解SOP步骤..."):
+                # 搜索策略：增加 "做法" "食谱" "配方" 等关键词
+                search_query = f"{user_input} 高端中餐 创意菜 做法食谱 详细配方plating"
                 search = TavilySearchResults(tavily_api_key=tavily_key, max_results=5)
                 evidence = search.invoke(search_query)
                 
-                llm = ChatOpenAI(base_url=base_url, api_key=deepseek_key, model=model_name, temperature=0.7)
+                llm = ChatOpenAI(base_url=base_url, api_key=deepseek_key, model=model_name, temperature=0.6) # 温度调低，让步骤更严谨
                 chain = ChatPromptTemplate.from_messages([
-                    ("system", FUSION_PROMPT_TEXT),
+                    ("system", RD_PROMPT_TEXT),
                     ("user", "") 
                 ]) | llm | StrOutputParser()
                 
@@ -252,32 +264,25 @@ if user_input:
                 cleaned_lines = [line.strip() for line in text_response.split('\n')]
                 text_response = "\n".join(cleaned_lines)
 
-            # --- 自动配图 (后端严查版) ---
+            # --- 自动配图 (严查版) ---
             final_response = text_response
             dish_names = re.findall(r'data-dish-name="([^"]+)"', text_response)
             
-            with st.status("🖼️ 正在搜寻并验证配图...", expanded=True) as status:
+            with st.status("🖼️ 正在搜寻参考图...", expanded=True) as status:
                 for i, dish_name in enumerate(dish_names):
                     status.write(f"正在找图：{dish_name}")
-                    img_query = f"{dish_name} 精致菜品摄影 fine dining"
+                    img_query = f"{dish_name} 精致中餐摆盘 实拍图"
                     image_url = search_tavily_image(img_query, tavily_key)
                     
                     is_valid = False
                     if image_url:
-                        # 🔥 关键步骤：派侦察兵去检测
-                        status.write(f"正在验证链接有效性...")
                         if check_image_validity(image_url):
                             is_valid = True
-                        else:
-                            status.write(f"⚠️ 图片链接失效，已丢弃")
                     
                     if is_valid:
-                        # 只有检测通过的图，才会被写进 HTML
                         image_html = f"""<div class="dish-image-container"><img src="{image_url}" class="dish-image" alt="{dish_name}"><div class="image-caption">参考图源：Tavily AI Search</div></div>"""
                         final_response = final_response.replace('<div class="image-placeholder"></div>', image_html, 1)
-                        status.write(f"✅ 图片有效，已加载")
                     else:
-                        # 否则，直接删掉占位符，不留痕迹
                         final_response = final_response.replace('<div class="image-placeholder"></div>', '', 1)
                         
                 status.update(label="✅ 完成", state="complete", expanded=False)
@@ -289,9 +294,9 @@ if user_input:
             # 下载按钮
             now_str = datetime.datetime.now().strftime('%Y%m%d_%H%M')
             st.download_button(
-                label="📥 下载图文报告",
+                label="📥 下载SOP研发方案",
                 data=final_response,
-                file_name=f"研发方案_{now_str}.html",
+                file_name=f"研发SOP_{now_str}.html",
                 mime="text/html"
             )
 
