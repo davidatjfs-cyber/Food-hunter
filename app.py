@@ -1,9 +1,11 @@
 import streamlit as st
 import datetime
+import re # 引入正则库，专门处理乱码
 from langchain_openai import ChatOpenAI
 from langchain_community.tools.tavily_search import TavilySearchResults
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
+from streamlit_mic_recorder import speech_to_text
 
 # --- 1. 页面配置 ---
 st.set_page_config(
@@ -16,59 +18,77 @@ st.set_page_config(
 # --- 2. 深度 CSS 优化 ---
 st.markdown("""
 <style>
+    /* 全局字体 */
     h1 {color: #1A1A1A; font-family: 'Helvetica Neue', sans-serif;}
+    
+    /* 输入框固定底部 */
     .stChatInput {
         position: fixed; 
         bottom: 0; 
-        background: rgba(255, 255, 255, 0.95); 
+        background: rgba(255, 255, 255, 0.98); 
         padding-bottom: 20px; 
         padding-top: 10px;
         z-index: 999;
         border-top: 1px solid #eee;
     }
-    .block-container {padding-bottom: 150px;}
+    .block-container {padding-bottom: 160px;}
     
     /* 报告卡片：黑金风格 */
     .report-card {
         background-color: #ffffff;
-        padding: 22px;
-        border-radius: 12px;
+        padding: 24px;
+        border-radius: 16px;
         border: 1px solid #f0f0f0;
-        border-left: 5px solid #C5A059; /* 香槟金 */
-        margin-top: 15px;
+        border-left: 6px solid #C5A059; /* 香槟金 */
+        margin-top: 20px;
         box-shadow: 0 4px 20px rgba(0,0,0,0.06);
     }
+    
+    /* 菜名标题 */
     .dish-title {
-        font-size: 1.3rem;
+        font-size: 1.4rem;
         font-weight: 700;
         color: #1A1A1A;
-        margin-bottom: 12px;
-        display: flex;
-        align-items: center;
-        flex-wrap: wrap;
+        margin-bottom: 15px;
+        border-bottom: 1px solid #eee;
+        padding-bottom: 10px;
     }
+    
+    /* 强制链接样式 */
     .dish-link {
-        color: #0056b3 !important; 
+        color: #0056b3 !important;
         text-decoration: underline !important;
         cursor: pointer;
-        margin-right: 8px;
     }
-    .fusion-badge {
-        background-color: #1A1A1A;
-        color: #C5A059;
-        padding: 4px 10px;
-        border-radius: 4px;
-        font-size: 0.7rem;
+    
+    /* 核心章节标题 (H4) */
+    h4 {
+        color: #C5A059 !important; /* 金色标题 */
+        font-size: 1.05rem !important;
+        font-weight: bold !important;
+        margin-top: 15px !important;
+        margin-bottom: 5px !important;
         text-transform: uppercase;
-        letter-spacing: 1px;
-        white-space: nowrap;
+        letter-spacing: 0.5px;
     }
-    .section-title {
+    
+    /* 正文文字 */
+    p, li {
         font-size: 0.95rem;
-        font-weight: bold;
-        color: #C5A059;
-        margin-top: 12px;
-        margin-bottom: 4px;
+        line-height: 1.6;
+        color: #444;
+        margin-bottom: 8px;
+    }
+    
+    /* 摆盘美学高亮块 */
+    .plating-box {
+        background-color: #F9F9F9;
+        border-radius: 8px;
+        padding: 10px 15px;
+        border-left: 3px solid #333;
+        margin-top: 10px;
+        font-style: italic;
+        color: #555;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -94,79 +114,51 @@ with st.sidebar:
         if not tavily_key:
             tavily_key = st.text_input("Tavily Key", type="password")
     
-    if st.button("🗑️ 清空聊天记录"):
+    if st.button("🗑️ 清空聊天记录", type="secondary"):
         st.session_state.messages = []
         st.rerun()
 
 # --- 5. 标题 ---
-st.title("👨‍🍳 行政总厨 (Fusion Pro)")
-st.caption("v13.1: 修复代码显示问题 • 链接可点击 • 支持下载")
+st.title("👨‍🍳 行政总厨 (视觉美学版)")
+st.caption("v14.0: 修复乱码 • 增加摆盘指导 • 链接直达")
 
-def handle_quick_action(prompt_text):
-    st.session_state.messages.append({"role": "user", "content": prompt_text})
-    st.session_state.trigger_run = True
-
-if len(st.session_state.messages) == 0:
-    st.markdown("### 🔥 融合灵感")
-    c1, c2 = st.columns(2)
-    with c1:
-        if st.button("🥩 牛排的中式做法"):
-            handle_quick_action("我想做一道高客单价的牛肉菜，用西式牛排的食材（如M9和牛），但要融合中式/潮汕的口味或酱汁。")
-            st.rerun()
-    with c2:
-        if st.button("🥗 西式摆盘的潮汕菜"):
-            handle_quick_action("传统的潮汕冻鱼或生腌，如何通过西餐的摆盘和配料（如鱼子酱、泡沫）来提升价值感？")
-            st.rerun()
-
-# --- 6. 核心 Prompt ---
+# --- 6. 核心 Prompt (简化HTML结构，防止AI出错) ---
 base_url = "https://api.deepseek.com"
 model_name = "deepseek-chat"
 
+# 这里我们将指令改得更简单，用标准 H4 标签，AI 不容易出错
 FUSION_PROMPT = """
-你是一名精通**【中西融合菜 (Fusion Cuisine)】**的行政总厨。
+你是一名精通**【中西融合菜】**的行政总厨。
 用户需求："{user_input}"
 市场情报："{evidence}"
 
-请提供 **3个** 具体的【中西结合】菜品研发方案。
+请提供 **3个** 高溢价的研发方案。
 
-⚠️ **重要格式指令：**
-1. **直接输出 HTML 代码**，不要用 Markdown 代码块包裹（不要输出 ```html）。
-2. **链接格式：** `<a href="https://www.google.com/search?q=菜名&tbm=isch" class="dish-link" target="_blank">菜名</a>`
+⚠️ **格式铁律（违反会导致系统崩溃）：**
+1.  **纯 HTML 输出：** 不要用 Markdown 代码块包裹（严禁使用 ```html 或 ```）。
+2.  **链接格式：** `<a href="https://www.google.com/search?q=菜名&tbm=isch" class="dish-link" target="_blank">菜名</a>`
+3.  **摆盘美学：** 每个方案必须包含【摆盘指导】，描述器皿选择、堆叠方式、酱汁划盘、装饰物。
 
-报告结构（HTML）：
+输出模板（请严格照抄结构）：
 <div class="report-card">
     <div class="dish-title">
-        1. <a href="[https://www.google.com/search?q=菜名&tbm=isch](https://www.google.com/search?q=菜名&tbm=isch)" class="dish-link" target="_blank">菜名</a> 
-        <span class="fusion-badge">Fusion Idea</span>
+        1. <a href="https://www.google.com/search?q=菜名&tbm=isch" class="dish-link" target="_blank">菜名</a>
     </div>
-    <div class="section-title">💡 中西碰撞点 (The Twist)</div>
-    <p>解释这道菜哪里中西结合了？</p>
     
-    <div class="section-title">👨‍🍳 核心食材与技法</div>
-    <p>列出关键材料和烹饪要点。</p>
+    <h4>💡 中西融合灵感</h4>
+    <p>解释融合点...</p>
+    
+    <h4>👨‍🍳 核心食材与技法</h4>
+    <p>列出关键材料和步骤...</p>
+    
+    <h4>🎨 摆盘美学 (Plating)</h4>
+    <div class="plating-box">
+        <p><strong>器皿：</strong>黑岩板 / 白瓷草帽盘 / 复古铜盘...</p>
+        <p><strong>构图：</strong>...描述如何摆放...</p>
+    </div>
 </div>
 
-<div class="report-card">
-    <div class="dish-title">
-        2. <a href="[https://www.google.com/search?q=菜名&tbm=isch](https://www.google.com/search?q=菜名&tbm=isch)" class="dish-link" target="_blank">菜名</a> 
-        <span class="fusion-badge">Fusion Idea</span>
-    </div>
-    <div class="section-title">💡 中西碰撞点 (The Twist)</div>
-    <p>...</p>
-    <div class="section-title">👨‍🍳 核心食材与技法</div>
-    <p>...</p>
-</div>
-
-<div class="report-card">
-    <div class="dish-title">
-        3. <a href="[https://www.google.com/search?q=菜名&tbm=isch](https://www.google.com/search?q=菜名&tbm=isch)" class="dish-link" target="_blank">菜名</a> 
-        <span class="fusion-badge">Fusion Idea</span>
-    </div>
-    <div class="section-title">💡 中西碰撞点 (The Twist)</div>
-    <p>...</p>
-    <div class="section-title">👨‍🍳 核心食材与技法</div>
-    <p>...</p>
-</div>
+(请重复3次，分别对应三个方案)
 """
 
 # --- 7. 主程序 ---
@@ -177,17 +169,37 @@ for msg in st.session_state.messages:
         else:
             st.markdown(msg["content"])
 
-user_input = st.chat_input("请输入研发需求（例如：用海鲜做一道中西结合的前菜）...")
+# --- 8. 交互区域 ---
+st.markdown("<br>", unsafe_allow_html=True)
+action_container = st.container()
 
-if user_input or st.session_state.get("trigger_run", False):
-    if st.session_state.get("trigger_run", False):
-        current_prompt = st.session_state.messages[-1]["content"]
-        st.session_state.trigger_run = False
-    else:
-        current_prompt = user_input
-        st.session_state.messages.append({"role": "user", "content": current_prompt})
-        with st.chat_message("user"):
-            st.markdown(current_prompt)
+with action_container:
+    c1, c2 = st.columns([0.85, 0.15]) 
+    with c1:
+        st.caption("👇 点击右侧话筒说话，或在下方打字")
+    with c2:
+        text_from_voice = speech_to_text(
+            language='zh',
+            start_prompt="🎙️",
+            stop_prompt="⏹️",
+            just_once=True,
+            key='STT_V14'
+        )
+
+final_input = None
+if text_from_voice:
+    final_input = text_from_voice
+    st.toast(f"🎤 识别内容：{text_from_voice}")
+
+text_input = st.chat_input("输入研发需求（例如：想做一道带烟熏味的牛肉前菜）...")
+if text_input:
+    final_input = text_input
+
+# --- 执行逻辑 ---
+if final_input:
+    st.session_state.messages.append({"role": "user", "content": final_input})
+    with st.chat_message("user"):
+        st.markdown(final_input)
 
     if not deepseek_key or not tavily_key:
         st.error("❌ 未检测到 API Key")
@@ -196,8 +208,8 @@ if user_input or st.session_state.get("trigger_run", False):
     with st.chat_message("assistant"):
         placeholder = st.empty()
         try:
-            with st.spinner("👨‍🍳 行政总厨正在构思融合灵感..."):
-                search_query = f"{current_prompt} 中西融合菜 创意菜 做法 搭配 Fusion Cuisine"
+            with st.spinner("👨‍🍳 总厨正在设计摆盘..."):
+                search_query = f"{final_input} 高端摆盘 中西融合菜 做法 创意 French plating"
                 search = TavilySearchResults(tavily_api_key=tavily_key, max_results=5)
                 evidence = search.invoke(search_query)
                 
@@ -209,13 +221,15 @@ if user_input or st.session_state.get("trigger_run", False):
                 ]) | llm | StrOutputParser()
                 
                 response = chain.invoke({
-                    "user_input": current_prompt, 
+                    "user_input": final_input, 
                     "evidence": evidence
                 })
                 
-                # --- 🔥 关键修复：剥掉 AI 自动加上的代码框 ---
-                # 这样浏览器就会渲染卡片，而不是显示 raw code
-                response = response.replace("```html", "").replace("```", "").strip()
+                # --- 🔥 强力清洗代码 (Regex Cleaning) ---
+                # 无论 AI 输出什么乱七八糟的代码块，全部用正则清理掉
+                # 去掉 ```html, ```xml, ``` 等
+                response = re.sub(r"```[a-zA-Z]*", "", response) 
+                response = response.replace("```", "").strip()
 
                 placeholder.markdown(response, unsafe_allow_html=True)
                 st.session_state.messages.append({"role": "assistant", "content": response})
