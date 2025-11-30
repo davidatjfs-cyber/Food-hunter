@@ -9,7 +9,7 @@ from tavily import TavilyClient
 
 # --- 1. 页面配置 ---
 st.set_page_config(
-    page_title="Chef Fusion Gallery (Fixed)",
+    page_title="Chef Fusion Pro",
     page_icon="👨‍🍳",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -88,6 +88,7 @@ st.markdown("""
         justify-content: center;
         align-items: center;
         flex-direction: column;
+        /* 注意：如果图片加载失败，我们会用JS隐藏整个容器 */
     }
     .dish-image {
         width: 100%;
@@ -103,6 +104,7 @@ st.markdown("""
         width: 100%;
         text-align: center;
         background: #fafafa;
+        border-top: 1px solid #eee;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -148,8 +150,8 @@ with st.sidebar:
         st.rerun()
 
 # --- 6. 主界面 ---
-st.title("👨‍🍳 行政总厨 (图文修复版)")
-st.caption("v19.1: 修复代码外露问题 • 自动配图 • 研发必备")
+st.title("👨‍🍳 行政总厨 (纯净图文版)")
+st.caption("v20.0: 有图则显，无图隐身 • 宁缺毋滥")
 
 # --- 7. Prompt ---
 base_url = "https://api.deepseek.com"
@@ -226,23 +228,23 @@ if user_input:
                 cleaned_lines = [line.strip() for line in text_response.split('\n')]
                 text_response = "\n".join(cleaned_lines)
 
-            # --- 自动配图 (修复版) ---
+            # --- 自动配图 (宁缺毋滥版) ---
             final_response = text_response
             dish_names = re.findall(r'data-dish-name="([^"]+)"', text_response)
             
             with st.status("🖼️ 正在搜寻配图...", expanded=True) as status:
                 for i, dish_name in enumerate(dish_names):
                     status.write(f"正在找图：{dish_name}")
-                    img_query = f"{dish_name} 精致菜品摄影 实拍图"
+                    img_query = f"{dish_name} 精致菜品摄影 fine dining"
                     image_url = search_tavily_image(img_query, tavily_key)
                     
                     if image_url:
-                        # 🔥 核心修复：这里把 HTML 写成死死的一行，绝对不换行，不缩进！
-                        # 这样 Streamlit 就不会把它误判成代码块了
-                        image_html = f'<div class="dish-image-container"><img src="{image_url}" class="dish-image" alt="{dish_name}" onerror="this.style.display=\'none\'"><div class="image-caption">参考图源：Tavily AI Search</div></div>'
-                        
+                        # 🔥 核心逻辑：有图就显示，
+                        # 并且加了一个 onerror 事件：如果图片链接坏了，JS会自动把整个容器(parentElement)隐藏掉
+                        image_html = f"""<div class="dish-image-container"><img src="{image_url}" class="dish-image" alt="{dish_name}" onerror="this.parentElement.style.display='none'"><div class="image-caption">参考图源：Tavily AI Search</div></div>"""
                         final_response = final_response.replace('<div class="image-placeholder"></div>', image_html, 1)
                     else:
+                        # 🔥 如果搜不到图，直接把占位符删掉，什么都不留
                         final_response = final_response.replace('<div class="image-placeholder"></div>', '', 1)
                         
                 status.update(label="✅ 完成", state="complete", expanded=False)
