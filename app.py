@@ -1,6 +1,6 @@
 import streamlit as st
 import datetime
-import re # 正则清洁工，专门处理乱码
+import re
 from langchain_openai import ChatOpenAI
 from langchain_community.tools.tavily_search import TavilySearchResults
 from langchain_core.prompts import ChatPromptTemplate
@@ -8,19 +8,19 @@ from langchain_core.output_parsers import StrOutputParser
 
 # --- 1. 页面配置 ---
 st.set_page_config(
-    page_title="Chef Fusion Pro",
+    page_title="Chef Fusion History",
     page_icon="👨‍🍳",
     layout="wide",
-    initial_sidebar_state="collapsed"
+    initial_sidebar_state="expanded" # 默认展开侧边栏，为了看历史
 )
 
-# --- 2. 深度 CSS 优化 (黑金风格) ---
+# --- 2. CSS 样式 (去掉了链接样式，保留黑金卡片) ---
 st.markdown("""
 <style>
     /* 全局字体 */
     h1 {color: #1A1A1A; font-family: 'Helvetica Neue', sans-serif;}
     
-    /* 调整底部留白 */
+    /* 底部留白 */
     .block-container {padding-bottom: 100px;}
     
     /* 报告卡片：黑金风格 */
@@ -34,7 +34,7 @@ st.markdown("""
         box-shadow: 0 4px 20px rgba(0,0,0,0.06);
     }
     
-    /* 菜名标题 */
+    /* 菜名标题 (去掉了链接颜色，改为黑金) */
     .dish-title {
         font-size: 1.4rem;
         font-weight: 700;
@@ -43,13 +43,6 @@ st.markdown("""
         border-bottom: 1px solid #eee;
         padding-bottom: 10px;
         line-height: 1.4;
-    }
-    
-    /* 强制链接样式 */
-    .dish-link {
-        color: #0056b3 !important;
-        text-decoration: underline !important;
-        cursor: pointer;
     }
     
     /* 核心章节标题 (H4) */
@@ -81,6 +74,17 @@ st.markdown("""
         color: #555;
         font-size: 0.95rem;
     }
+    
+    /* 侧边栏历史记录样式 */
+    .history-item {
+        padding: 8px 10px;
+        background: #f0f2f6;
+        border-radius: 5px;
+        margin-bottom: 8px;
+        font-size: 0.9rem;
+        color: #555;
+        border-left: 3px solid #C5A059;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -96,24 +100,43 @@ tavily_key = get_api_key("TAVILY_API_KEY")
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# --- 4. 侧边栏 ---
+# --- 4. 侧边栏 (新增：历史记录列表) ---
 with st.sidebar:
-    st.title("⚙️ 设置")
+    st.title("⚙️ 设置 & 历史")
+    
+    # 1. 设置区
     with st.expander("🔑 API Key 配置"):
         if not deepseek_key:
             deepseek_key = st.text_input("DeepSeek Key", type="password")
         if not tavily_key:
             tavily_key = st.text_input("Tavily Key", type="password")
-    
-    if st.button("🗑️ 清空聊天记录", type="secondary"):
+            
+    if st.button("🗑️ 清空所有记录", type="primary"):
         st.session_state.messages = []
         st.rerun()
+        
+    st.divider()
+    
+    # 2. 历史提问区 (模仿 Chat 列表)
+    st.subheader("📜 历史提问")
+    
+    # 筛选出用户的提问
+    user_msgs = [m for m in st.session_state.messages if m["role"] == "user"]
+    
+    if not user_msgs:
+        st.caption("暂无记录")
+    else:
+        # 倒序显示，最新的在最上面
+        for i, msg in enumerate(reversed(user_msgs)):
+            # 截取前20个字作为标题
+            title = msg["content"][:20] + "..." if len(msg["content"]) > 20 else msg["content"]
+            st.markdown(f'<div class="history-item">{title}</div>', unsafe_allow_html=True)
 
-# --- 5. 标题 ---
+# --- 5. 主界面标题 ---
 st.title("👨‍🍳 行政总厨 (纯净版)")
-st.caption("v16.0: 稳定快速 • 视觉美学 • 研发必备")
+st.caption("v17.0: 无链接 • 左侧历史记录 • 摆盘指导")
 
-# --- 6. 核心 Prompt ---
+# --- 6. 核心 Prompt (去掉了链接指令) ---
 base_url = "https://api.deepseek.com"
 model_name = "deepseek-chat"
 
@@ -124,14 +147,14 @@ FUSION_PROMPT = """
 
 请提供 **3个** 高溢价的研发方案。
 
-⚠️ **格式铁律（违反会导致乱码）：**
+⚠️ **格式铁律：**
 1.  **纯 HTML 输出：** 不要用 ```html 包裹。
-2.  **不要缩进：** 所有 HTML 标签必须顶格写，行首不要有空格。
-3.  **链接格式：** `<a href="https://www.google.com/search?q=菜名&tbm=isch" class="dish-link" target="_blank">菜名</a>`
+2.  **不要缩进：** 所有 HTML 标签必须顶格写。
+3.  **不要加链接：** 菜名直接写文本即可，不要加 <a> 标签。
 
 输出模板（直接输出 HTML）：
 <div class="report-card">
-<div class="dish-title">1. <a href="[https://www.google.com/search?q=菜名&tbm=isch](https://www.google.com/search?q=菜名&tbm=isch)" class="dish-link" target="_blank">菜名</a></div>
+<div class="dish-title">1. 菜名</div>
 <h4>💡 中西融合灵感</h4>
 <p>解释融合点...</p>
 <h4>👨‍🍳 核心食材与技法</h4>
@@ -152,7 +175,7 @@ for msg in st.session_state.messages:
         else:
             st.markdown(msg["content"])
 
-# --- 8. 交互区域 (纯净输入框) ---
+# --- 8. 输入框 ---
 user_input = st.chat_input("输入研发需求（例如：做一道适合秋季的创意鸭肉菜）...")
 
 # --- 执行逻辑 ---
@@ -162,7 +185,7 @@ if user_input:
         st.markdown(user_input)
 
     if not deepseek_key or not tavily_key:
-        st.error("❌ 未检测到 API Key，请在侧边栏配置")
+        st.error("❌ 未检测到 API Key")
         st.stop()
 
     with st.chat_message("assistant"):
@@ -185,12 +208,11 @@ if user_input:
                     "evidence": evidence
                 })
                 
-                # --- 🔥 强力清洁工 (保留这个逻辑，防乱码) ---
-                # 1. 去掉 ```html 和 ```
+                # 清洗代码框
                 response = re.sub(r"```[a-zA-Z]*", "", response)
                 response = response.replace("```", "")
                 
-                # 2. 去掉每一行的缩进
+                # 清除缩进
                 cleaned_lines = [line.strip() for line in response.split('\n')]
                 response = "\n".join(cleaned_lines)
 
