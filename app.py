@@ -7,39 +7,49 @@ from langchain_core.output_parsers import StrOutputParser
 
 # --- 1. 页面配置 ---
 st.set_page_config(
-    page_title="FoodHunter R&D",
-    page_icon="👨‍🍳",
+    page_title="FoodHunter Fusion",
+    page_icon="🍽️",
     layout="wide",
     initial_sidebar_state="collapsed"
 )
 
+# 注入 CSS (更高级的黑金风格，体现中西融合的高级感)
 st.markdown("""
 <style>
     .stChatInput {position: fixed; bottom: 0; padding-bottom: 15px; background: white; z-index: 999;}
     .block-container {padding-top: 2rem; padding-bottom: 10rem;} 
-    h1 {color: #E65100;} /* 换成更有食欲的橙色 */
+    h1 {color: #1A1A1A;}
     .report-card {
         background-color: #fff;
         padding: 25px;
-        border-radius: 12px;
-        border: 1px solid #eee;
-        border-left: 6px solid #E65100;
-        margin-top: 15px;
-        box-shadow: 0 4px 10px rgba(0,0,0,0.05);
+        border-radius: 15px;
+        border: 1px solid #e0e0e0;
+        border-left: 6px solid #CCA352; /* 黑金配色的金 */
+        margin-top: 20px;
+        box-shadow: 0 10px 20px rgba(0,0,0,0.05);
     }
     .dish-title {
-        font-size: 1.3rem;
+        font-size: 1.4rem;
         font-weight: bold;
-        color: #E65100;
-        margin-bottom: 10px;
+        color: #1A1A1A;
+        margin-bottom: 12px;
+        display: flex;
+        align-items: center;
     }
-    .tag {
-        background-color: #FFF3E0;
-        color: #E65100;
-        padding: 2px 8px;
-        border-radius: 10px;
-        font-size: 0.8rem;
-        margin-right: 5px;
+    .fusion-badge {
+        background-color: #1A1A1A;
+        color: #CCA352;
+        padding: 4px 10px;
+        border-radius: 4px;
+        font-size: 0.7rem;
+        margin-left: 10px;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+    }
+    .section-title {
+        font-weight: bold;
+        color: #CCA352;
+        margin-top: 10px;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -69,62 +79,77 @@ with st.sidebar:
         st.session_state.messages = []
         st.rerun()
 
-# --- 4. 标题与身份定义 ---
-st.title("👨‍🍳 餐饮研发总监 (R&D Director)")
-st.caption("v9.0: 精通食材与烹饪 • 结合市场趋势提供研发方案")
+# --- 4. 标题与身份 ---
+st.title("🍽️ 行政总厨 (Fusion Cuisine)")
+st.caption("v10.0: 擅长中西食材碰撞 • 打造高溢价创意菜")
 
 def handle_quick_action(prompt_text):
     st.session_state.messages.append({"role": "user", "content": prompt_text})
     st.session_state.trigger_run = True
 
 if len(st.session_state.messages) == 0:
-    st.markdown("### 🔥 研发方向")
+    st.markdown("### 🔥 融合灵感")
     c1, c2 = st.columns(2)
     with c1:
-        if st.button("🍲 冬季滋补菜研发"):
-            handle_quick_action("我想开发几道适合冬天的滋补菜，要用牛羊肉，但做法要新颖，不要老一套。")
+        if st.button("🥩 牛排的中式做法"):
+            handle_quick_action("我想做一道高客单价的牛肉菜，用西式牛排的食材（如M9和牛），但要融合中式/潮汕的口味或酱汁。")
             st.rerun()
     with c2:
-        if st.button("🦐 潮汕菜微创新"):
-            handle_quick_action("我是做潮汕菜的，想在这个基础上结合现在的流行趋势做点微创新，有什么具体菜品建议？")
+        if st.button("🥗 西式摆盘的潮汕菜"):
+            handle_quick_action("传统的潮汕冻鱼或生腌，如何通过西餐的摆盘和配料（如鱼子酱、泡沫）来提升价值感？")
             st.rerun()
 
-# --- 5. 核心 Prompt (角色大变身) ---
+# --- 5. 核心 Prompt (中西融合版) ---
 base_url = "https://api.deepseek.com"
 model_name = "deepseek-chat"
 
-RD_PROMPT = """
-你是一名拥有20年经验的【餐饮研发总监】兼【行政总厨】。
-你精通中西餐各种食材特性、烹饪技法（如低温慢煮、啫啫、生腌、分子料理等）以及风味搭配逻辑。
+FUSION_PROMPT = """
+你是一名精通**【中西融合菜 (Fusion Cuisine)】**的行政总厨。
+你深谙**法餐/意餐**的精致摆盘与食材（如黑松露、鱼子酱、芝士、迷迭香），同时精通**中餐**（特别是粤菜/潮汕菜）的底味与锅气。
 
 用户的需求是："{user_input}"
-搜索到的市场情报是："{evidence}"
+市场情报："{evidence}"
 
-请结合市场情报和你专业的烹饪知识，提供 **3个** 具体的菜品研发建议。
+请提供 **3个** 具体的【中西结合】菜品研发方案。
 
-⚠️ **输出要求：**
-1.  **具体菜名**：必须是具体的、可落地的菜名，不要笼统的类别。
-2.  **研发思路**：一句话解释为什么要推这道菜（结合了什么流行趋势？解决了什么痛点？）。
-3.  **烹饪/食材亮点**：**这是你发挥专家能力的地方。** 请指出这道菜的关键食材、特殊调味或创新技法。（例如：用了什么特殊的酱汁？加了什么意想不到的辅料？）
-4.  **视觉链接**：给菜名加上 Google 图片链接。
+⚠️ **融合原则（必须遵守）：**
+1.  **结构：** 必须是 "中式食材+西式做法" 或 "西式食材+中式调味"。
+2.  **具体菜名：** 菜名要听起来很贵、很有创意。（例如：*黑松露慢煮鲍鱼*、*普宁豆酱焗波士顿龙虾*）。
+3.  **视觉链接：** 菜名必须加 Google 图片链接。
 
 报告结构：
 <div class="report-card">
-    <div class="dish-title">1. [菜名](链接) <span class="tag">推荐指数⭐⭐⭐⭐⭐</span></div>
-    <p><strong>💡 研发思路：</strong> ...</p>
-    <p><strong>👨‍🍳 烹饪/食材亮点：</strong> ...</p>
+    <div class="dish-title">
+        1. [菜名](链接) 
+        <span class="fusion-badge">Fusion Idea</span>
+    </div>
+    <div class="section-title">💡 中西碰撞点 (The Twist)</div>
+    <p>解释这道菜哪里中西结合了？（例如：用了法式低温慢煮处理中式狮子头）</p>
+    
+    <div class="section-title">👨‍🍳 核心食材与技法</div>
+    <p>列出关键材料（如：帕玛森芝士、5J火腿）和烹饪要点。</p>
 </div>
 
 <div class="report-card">
-    <div class="dish-title">2. [菜名](链接) <span class="tag">推荐指数⭐⭐⭐⭐</span></div>
-    <p><strong>💡 研发思路：</strong> ...</p>
-    <p><strong>👨‍🍳 烹饪/食材亮点：</strong> ...</p>
+    <div class="dish-title">
+        2. [菜名](链接) 
+        <span class="fusion-badge">Fusion Idea</span>
+    </div>
+    <div class="section-title">💡 中西碰撞点 (The Twist)</div>
+    <p>...</p>
+    <div class="section-title">👨‍🍳 核心食材与技法</div>
+    <p>...</p>
 </div>
 
 <div class="report-card">
-    <div class="dish-title">3. [菜名](链接) <span class="tag">推荐指数⭐⭐⭐⭐</span></div>
-    <p><strong>💡 研发思路：</strong> ...</p>
-    <p><strong>👨‍🍳 烹饪/食材亮点：</strong> ...</p>
+    <div class="dish-title">
+        3. [菜名](链接) 
+        <span class="fusion-badge">Fusion Idea</span>
+    </div>
+    <div class="section-title">💡 中西碰撞点 (The Twist)</div>
+    <p>...</p>
+    <div class="section-title">👨‍🍳 核心食材与技法</div>
+    <p>...</p>
 </div>
 """
 
@@ -136,7 +161,7 @@ for msg in st.session_state.messages:
         else:
             st.markdown(msg["content"])
 
-user_input = st.chat_input("请输入您的研发方向（如：想做一道有仪式感的鸡肉菜）...")
+user_input = st.chat_input("请输入研发需求（例如：用海鲜做一道中西结合的前菜）...")
 
 if user_input or st.session_state.get("trigger_run", False):
     if st.session_state.get("trigger_run", False):
@@ -155,21 +180,19 @@ if user_input or st.session_state.get("trigger_run", False):
     with st.chat_message("assistant"):
         placeholder = st.empty()
         try:
-            with st.spinner("👨‍🍳 研发总监正在拆解风味与技法..."):
-                # --- 搜索逻辑：不仅搜名字，还要搜“做法”和“创新” ---
-                # 这样才能保证 AI 拿到的是“有技术含量”的信息
-                search_query = f"{current_prompt} 创新做法 流行吃法 独特食材搭配 爆款菜单"
+            with st.spinner("👨‍🍳 行政总厨正在构思融合灵感..."):
+                # --- 搜索逻辑：强制加上 Fusion 相关的词 ---
+                search_query = f"{current_prompt} 中西融合菜 创意菜 做法 搭配 Fusion Cuisine"
                 
                 search = TavilySearchResults(tavily_api_key=tavily_key, max_results=5)
                 evidence = search.invoke(search_query)
                 
                 # --- 推理 ---
-                # 温度稍微调高一点(0.5)，让大厨在烹饪组合上有点创意，但不要太离谱
-                llm = ChatOpenAI(base_url=base_url, api_key=deepseek_key, model=model_name, temperature=0.5)
+                llm = ChatOpenAI(base_url=base_url, api_key=deepseek_key, model=model_name, temperature=0.7) # 融合菜需要高创意，温度调到0.7
                 
                 chain = ChatPromptTemplate.from_messages([
-                    ("system", RD_PROMPT),
-                    ("user", "") # Prompt里已经包含了 user_input，这里留空即可
+                    ("system", FUSION_PROMPT),
+                    ("user", "") 
                 ]) | llm | StrOutputParser()
                 
                 response = chain.invoke({
