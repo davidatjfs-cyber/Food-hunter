@@ -5,12 +5,11 @@ from langchain_openai import ChatOpenAI
 from langchain_community.tools.tavily_search import TavilySearchResults
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
-# 引入 Tavily 客户端 (直接用来搜图)
 from tavily import TavilyClient
 
 # --- 1. 页面配置 ---
 st.set_page_config(
-    page_title="Chef Fusion Gallery (Tavily)",
+    page_title="Chef Fusion Gallery (Fixed)",
     page_icon="👨‍🍳",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -78,14 +77,13 @@ st.markdown("""
         border-left: 3px solid #C5A059;
     }
 
-    /* 图片容器 */
+    /* 图片容器样式 */
     .dish-image-container {
         margin-top: 15px;
         border-radius: 12px;
         overflow: hidden;
         box-shadow: 0 4px 12px rgba(0,0,0,0.1);
         background: #f9f9f9;
-        min-height: 200px;
         display: flex;
         justify-content: center;
         align-items: center;
@@ -93,7 +91,7 @@ st.markdown("""
     }
     .dish-image {
         width: 100%;
-        height: 280px;
+        height: 250px;
         object-fit: cover;
         display: block;
     }
@@ -109,7 +107,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- 3. 密钥管理 (只用两个 Key) ---
+# --- 3. 密钥管理 ---
 def get_api_key(key_name):
     if key_name in st.secrets:
         return st.secrets[key_name]
@@ -121,21 +119,16 @@ tavily_key = get_api_key("TAVILY_API_KEY")
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# --- 4. 核心功能：Tavily 搜图函数 ---
+# --- 4. Tavily 搜图 ---
 def search_tavily_image(query, api_key):
-    """使用 Tavily 搜索图片 URL"""
     try:
-        # 初始化客户端
         client = TavilyClient(api_key=api_key)
-        # include_images=True 是关键
         response = client.search(query=query, search_depth="basic", include_images=True, max_results=1)
-        
-        # 提取图片
         if 'images' in response and len(response['images']) > 0:
-            return response['images'][0] # 返回第一张图的链接
+            return response['images'][0]
         return None
     except Exception as e:
-        print(f"Tavily image search failed: {e}")
+        print(f"Error: {e}")
         return None
 
 # --- 5. 侧边栏 ---
@@ -155,10 +148,10 @@ with st.sidebar:
         st.rerun()
 
 # --- 6. 主界面 ---
-st.title("👨‍🍳 行政总厨 (Tavily图文版)")
-st.caption("v19.0: 无需Google Key • 自动配图 • 研发必备")
+st.title("👨‍🍳 行政总厨 (图文修复版)")
+st.caption("v19.1: 修复代码外露问题 • 自动配图 • 研发必备")
 
-# --- 7. 核心 Prompt ---
+# --- 7. Prompt ---
 base_url = "https://api.deepseek.com"
 model_name = "deepseek-chat"
 
@@ -209,13 +202,12 @@ if user_input:
         st.markdown(user_input)
 
     if not deepseek_key or not tavily_key:
-        st.error("❌ API Key 缺失，请检查 Secrets 中是否配置了 DEEPSEEK_API_KEY 和 TAVILY_API_KEY。")
+        st.error("❌ Key 缺失")
         st.stop()
 
     with st.chat_message("assistant"):
         placeholder = st.empty()
         try:
-            # --- 第一阶段：生成文本报告 ---
             with st.spinner("👨‍🍳 总厨正在构思方案..."):
                 search_query = f"{user_input} 高端摆盘 中西融合菜 做法 创意 plating"
                 search = TavilySearchResults(tavily_api_key=tavily_key, max_results=5)
@@ -234,36 +226,26 @@ if user_input:
                 cleaned_lines = [line.strip() for line in text_response.split('\n')]
                 text_response = "\n".join(cleaned_lines)
 
-            # --- 第二阶段：Tavily 自动配图 ---
+            # --- 自动配图 (修复版) ---
             final_response = text_response
-            
-            # 提取菜名
             dish_names = re.findall(r'data-dish-name="([^"]+)"', text_response)
             
-            with st.status("🖼️ 正在搜寻配图 (via Tavily)...", expanded=True) as status:
+            with st.status("🖼️ 正在搜寻配图...", expanded=True) as status:
                 for i, dish_name in enumerate(dish_names):
-                    status.write(f"正在为「{dish_name}」找图...")
-                    
-                    # 搜图关键词：加上 "真实图片" "精致" 提高命中率
+                    status.write(f"正在找图：{dish_name}")
                     img_query = f"{dish_name} 精致菜品摄影 实拍图"
-                    
-                    # 使用 Tavily 搜图
                     image_url = search_tavily_image(img_query, tavily_key)
                     
                     if image_url:
-                        status.write(f"✅ 找到图片 (方案 {i+1})")
-                        image_html = f"""
-                        <div class="dish-image-container">
-                            <img src="{image_url}" class="dish-image" alt="{dish_name}" onerror="this.style.display='none'">
-                            <div class="image-caption">参考图源：Tavily AI Search</div>
-                        </div>
-                        """
+                        # 🔥 核心修复：这里把 HTML 写成死死的一行，绝对不换行，不缩进！
+                        # 这样 Streamlit 就不会把它误判成代码块了
+                        image_html = f'<div class="dish-image-container"><img src="{image_url}" class="dish-image" alt="{dish_name}" onerror="this.style.display=\'none\'"><div class="image-caption">参考图源：Tavily AI Search</div></div>'
+                        
                         final_response = final_response.replace('<div class="image-placeholder"></div>', image_html, 1)
                     else:
-                        status.write(f"⚠️ 没找到合适图片，已跳过")
                         final_response = final_response.replace('<div class="image-placeholder"></div>', '', 1)
                         
-                status.update(label="✅ 研发报告完成", state="complete", expanded=False)
+                status.update(label="✅ 完成", state="complete", expanded=False)
 
             # 显示最终结果
             placeholder.markdown(final_response, unsafe_allow_html=True)
